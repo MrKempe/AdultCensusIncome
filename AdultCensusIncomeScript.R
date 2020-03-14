@@ -25,11 +25,11 @@ clean_data <- clean_data %>%
 
 # Create train and validation set
 set.seed(1, sample.kind="Rounding")
-validation_index <- createDataPartition(y = clean_data$income, times = 1, p = 0.1, list = FALSE)
-train <- clean_data[-validation_index,]
-validation <- clean_data[validation_index,]
+validation_index <- createDataPartition(y = clean_data$income, times = 1, p = 0.3, list = FALSE)
+training_set <- clean_data[-validation_index,]
+validation_set <- clean_data[validation_index,]
 
-clean_data %>% 
+age_graph <- training_set %>% 
   group_by(age, income) %>% 
   summarize(n = n()) %>% 
   mutate(pct = n/sum(n)) %>% 
@@ -42,10 +42,9 @@ clean_data %>%
     stat_smooth(geom = "area", method = "loess", span = 1/3, alpha = 1/2, fill = "#9ecae1") +
     scale_y_continuous(name = "Percentage", limits = c(0,0.45), labels = percent) +
     scale_x_continuous(name = "Age", breaks = seq(20,90,10), labels = seq(20,90,10))
+age_graph
   
-
-
-clean_data %>% 
+workclass_graph <- training_set %>% 
   group_by(workclass, income) %>% 
   summarize(n = n()) %>% 
   mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
@@ -56,3 +55,17 @@ clean_data %>%
     scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") + 
     geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
     coord_flip()
+workclass_graph
+
+education_graph <- training_set %>% 
+  group_by(education, education.num, income) %>% 
+  summarize(n=n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0, NA, n/sum(n))) %>% 
+  ggplot(aes(x = reorder(education, education.num), y = pct, fill = income)) +
+    geom_bar(stat = "identity") +
+    scale_x_discrete(name = "Education") +
+    scale_y_continuous(name = "Percentage", labels = percent) +
+    scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") +
+    geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
+    coord_flip()
+education_graph
