@@ -1,0 +1,600 @@
+---
+title: "Adult Census Income Project"
+author: "Pim Kempe"
+date: "March 2020"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+header-includes:
+- \usepackage{float}
+
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.pos = 'H')
+knitr::opts_chunk$set(fig.align = 'center')
+knitr::opts_chunk$set(warning=FALSE)
+```
+
+\newpage
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+# Install and load packages
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(tibble)) install.packages("tibble", repos = "http://cran.us.r-project.org")
+if(!require(scales)) install.packages("scales", repos = "http://cran.us.r-project.org")
+if(!require(forcats)) install.packages("forcats", repos = "http://cran.us.r-project.org")
+if(!require(gridExtra)) install.packages("gridExtra", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+
+# Set ggplot theme
+theme_set(theme_minimal())
+
+# Read raw data from Github repository
+raw_data <- read.csv("https://raw.githubusercontent.com/MrKempe/AdultCensusIncome/master/adult.csv", stringsAsFactors=TRUE)
+
+# Replace '?' with NA
+clean_data <- na_if(raw_data, "?") %>% 
+  mutate_if(is.factor, fct_explicit_na) %>% 
+  droplevels()
+  
+# Convert the Income column to a factor 
+clean_data <- clean_data %>% 
+  mutate(income = as.factor(ifelse(income=="<=50K",0,1))) 
+
+# Create train and validation set
+set.seed(1, sample.kind="Rounding")
+validation_index <- createDataPartition(y = clean_data$income, times = 1, p = 0.3, list = FALSE)
+training_set <- clean_data[-validation_index,]
+validation_set <- clean_data[validation_index,]
+```
+
+# Overview
+This project is the second assignment of the online edX course *HarvardX: PH125.9x - Data Science: Capstone*, which is the final part of the program *HarvardX Data Science Professional Certificate*. The goal of this assignment is to apply the knowledge gained during this program and use a publicly available data set to apply machine learning techniques.
+
+## Introduction
+In this assignment the Adult Census Income data set is used. This a publicly available data set on Kaggle created Ronny Kohavi and Barry Becker. The data is extracted from the 1994 Census bureau database and contains demographic information such as age, sex and education. The task of this project is to predict whether an individual's income exceeds 50.000 US Dollar per year. Hence this is a binary classification problem.
+
+The data set can be downloaded [here](https://www.kaggle.com/uciml/adult-census-income/download) and is reasonably clean and ready to use. More information can be found on [Kaggle](https://www.kaggle.com/uciml/adult-census-income).
+
+This project is carried out with *R* and *RStudio*. *R* is an environment and programming language focused on statistical analysis. *RStudio* is an environment for creating scripts and visualizations using the *R* language.
+
+\newpage
+
+# Methods & Analysis
+## Data Introduction
+The Adult Census Income data set contains `r nrow(raw_data)` observations and `r ncol(raw_data)`variables. The variables are both numerical and categorical, and are outlined below:
+
+* Response variable:
+    * __income__: Categorical variable that contains yearly income of the respondent ("<=$50K" or ">50K").
+* Features:
+    * __age__: Numerical variable that contains the age of the respondent.
+    * __workclass__: Categorical variable that contains the type of employer of the respondent:
+        * _?_: Unknown
+        * _Federal-gov_: Federal Government
+        * _Local-gov_: Local Government
+        * _Never-worked_: Never Worked
+        * _Private_: Private Sector
+        * _Self-emp-inc_: Self Employment (Corporate Entities)
+        * _Self-emp-not-inc_: Self Employment (Other Legal Entities)
+        * _State-gov_: State Government
+        * _Without-pay_: Unemployed
+    * __fnlwgt__: Numerical variable that contains the number of respondents that each row of the data set represents.
+    * __education__: Categorical variable that represents the level of education of the respondent (_Doctorate_, _Prof-school_, _Masters_, _Bachelors_, _Assoc-acdm_, _Assoc-voc_, _Some-college_, _HS-grad_, _12th_, _11th_, _10th_, _9th_, _7th-8th_, _5th-6th_, _1st-4th_, _Preschool_).
+    * __education.num__: Numerical variable that represents the _education_ variable.
+    * __marital.status__: The marital status of the respondent:
+        * _Divorced_: Divorced
+        * _Married-AF-spouse_: Married (Armed Forces spouse)
+        * _Married-civ-spouse_: Married (civil spouse)
+        * _Married-spouse-absent_: Married (living without spouse)
+        * _Never-married_: Never married
+        * _Separated_: Separated
+        * _Widowed_: Widowed
+    * __occupation__: Categorical variable that represents the type of employment of the respondent (_?_, _Adm-clerical_, _Armed-Forces_, _Craft-repair_, _Exec-managerial_, _Farming-fishing_, _Handlers-cleaners_, _Machine-op-inspct_, _Other-service_, _Priv-house-serv_, _Prof-specialty_, _Protective-serv_,  _Sales_,  _Tech-support_, _Transport-moving_). 
+    * __relationship__: Categorical variable that represents the position in the family of the respondent (_Husband_, _Not-in-family_, _Other-relative_, _Own-child_, _Unmarried_, _Wife_).
+    * __race__: Categorical variable that represents the race of the respondent (_Amer-Indian-Eskimo_, _Asian-Pac-Islander_, _Black_, _Other_, _White_).
+    * __sex__: Categorical variable that represent the sex of the respondent (_Female_, _Male_).
+    * __capital.gain__: Numerical variable that represents the income gained by the respondent from sources other than salary/wages.
+    * __capital.loss__: Numerical variable that represents the income lost by the respondent from sources other than salary/wages.
+    * __hours.per.week__: Numerical variable that represents the hours worked per week by the respondent.
+    * __native.country__: Categorical variable that represents the native country of the respondent. 
+
+## Data Preparation
+The figure below shows a snippet of the raw Adult Census Income data set.
+
+```{r, echo=FALSE, fig.cap="Adult Census Income data"}
+kable(raw_data[c(1:4,8:12),1:7], row.names = FALSE)
+kable(raw_data[c(1:4,8:12),-c(1:7)], row.names = FALSE)
+```
+
+As can be observed, missing/unknown values are represented by a '?'. Since *R* doesn't recognize a '?' as a missing/unknown value, the '?'s are replaced by 'N/A's.
+
+The variables *fnlwgt* and *education* are removed from the data set. The variable *fnlwgt* represents the weight of a specific combination of demographic characteristics in the data. Since this variable is merely a descriptive statistic of the census data, it can't/shouldn't be used to predict whether an individual earns more than 50.000 US Dollar per year. The variable *education* is removed because it's just a textual representation of the variable *education.num*. Remaining both *education* and *education.num* in the data set is useless.
+
+The response variable *income* will be changed such that "<=50K" = 0 and ">50K" = 1.
+
+Finally, the data set is separated into a training set (70%) and a validation set (30%). All data analysis and modelling is done on the training set since the validation set is ought to be considered as unknown. The validation set is only used to assess the performance of the final models.
+
+## Exploratory Data Analysis
+As mentioned above the data set is separated into a training set and test set. All Exploratory Data Analysis in this section is carried out using the training set.
+
+The training set contains `r nrow(training_set)` observations of which `r paste0(round(mean(as.numeric(as.character(training_set$income)))*100,0),"%")` has an income that exceeds 50.000 US Dollar per year. In the remaining part of this section each variable will be investigated separately.
+
+### Age
+```{r edaAge, echo=FALSE, fig.cap="Age"}
+age_graph_distr <- training_set %>% 
+  ggplot(aes(x=age)) +
+  geom_histogram(binwidth = 1) +
+  scale_x_continuous(name = "Age", breaks = seq(10,90,10), labels = seq(10,90,10)) +
+  scale_y_continuous(name = "Count", breaks = seq(0, 700, 100), labels = seq(0,700,100)) +
+  theme(plot.title = element_text(hjust = 0.5))
+
+age_graph_pct <- training_set %>% 
+  group_by(age, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n)) %>% 
+  complete(income, fill = list(n = 0, pct = 0)) %>% 
+  group_by(age) %>% 
+  mutate(max = max(as.numeric(income))) %>% 
+  filter(as.numeric(income)==max) %>% 
+  ggplot(aes(x = age, y = pct)) +
+    geom_line(size = 1) +
+    stat_smooth(geom = "area", method = "loess", span = 1/3, alpha = 1/2, fill = "#9ecae1") +
+    scale_y_continuous(name = "", limits = c(0,0.45), labels = percent) +
+    scale_x_continuous(name = "Age", breaks = seq(20,90,10), labels = seq(20,90,10)) +
+    theme(plot.title = element_text(hjust = 0.5))
+
+grid.arrange(age_graph_distr, age_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaAge} shows the distribution of the respondents age (left) and the percentage of respondents that earns more than 50.000 US Dollar per year by age (right). The average age of the respondent is `r round(mean(training_set$age),0)` years. Respondent between 35 and 60 years are more likely to earn more than 50.00 US Dollar per year.
+
+### Workclass
+
+```{r edaWorkclass, echo=FALSE, fig.cap="Workclass"}
+workclass_graph_distr <- training_set %>% 
+  group_by(workclass, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(workclass, order), y = n)) +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name = "Count") +
+  geom_bar(stat = "identity") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_flip()
+
+workclass_graph_pct <- training_set %>% 
+  group_by(workclass, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(workclass, order), y = pct, fill = income)) +
+    geom_bar(stat = "identity") +
+    scale_x_discrete(name = "") +
+    scale_y_continuous(name= "Percentage", labels = percent) +
+    scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") + 
+    geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
+    theme(plot.title = element_text(hjust = 0.5), axis.text.y=element_blank()) +
+    coord_flip()
+grid.arrange(workclass_graph_distr, workclass_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaWorkclass} shows that most respondents work for an employer in the private sector. Respondents that work for the government or are self-employed are more likely to earn more than 50.000 US Dollar per year.
+
+### Education
+
+```{r edaEducation, echo=FALSE, fig.cap="Education"}
+education_graph_distr <- training_set %>% 
+  group_by(education, education.num, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n))) %>% 
+  ggplot(aes(x = reorder(education, education.num), y = n)) +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name = "Count") +
+  geom_bar(stat = "identity") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_flip()
+
+education_graph_pct <- training_set %>% 
+  group_by(education, education.num, income) %>% 
+  summarize(n=n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0, NA, n/sum(n))) %>% 
+  ggplot(aes(x = reorder(education, education.num), y = pct, fill = income)) +
+    geom_bar(stat = "identity") +
+    scale_x_discrete(name = "") +
+    scale_y_continuous(name = "Percentage", labels = percent) +
+    scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") +
+    geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
+    theme(plot.title = element_text(hjust = 0.5), axis.text.y=element_blank()) +
+    coord_flip()
+grid.arrange(education_graph_distr, education_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaEducation} shows that most of the respondents finished High School, did some college or have a Bachelors degree. Respondents that finished an educational level higher than college are more likely to earn more than 50.000 US Dollar per year than average (`r paste0(round(mean(as.numeric(as.character(training_set$income)))*100,0),"%")`).
+
+### Marital Status
+
+```{r edaMaritalStatus, echo=FALSE, fig.cap="Marital Status"}
+marital_status_graph_distr <- training_set %>% 
+  group_by(marital.status, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(marital.status, order), y = n)) +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name = "Count") +
+  geom_bar(stat = "identity") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_flip()
+
+marital_status_graph_pct <- training_set %>% 
+  group_by(marital.status, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(marital.status, order), y = pct, fill = income)) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name= "Percentage", labels = percent) +
+  scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") + 
+  geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
+  theme(plot.title = element_text(hjust = 0.5), 
+        axis.text.y=element_blank()) +
+  coord_flip()
+grid.arrange(marital_status_graph_distr, marital_status_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaMaritalStatus} shows that most of the respondents are currently married or never have been married. Married respondents are much more likely to earn more than 50.000 US Dollar per year than non-married respondents.
+
+### Occupation
+
+```{r edaOccupation, echo=FALSE, fig.cap="Occupation"}
+occupation_graph_distr <- training_set %>% 
+  group_by(occupation, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(occupation, order), y = n)) +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name = "Count") +
+  geom_bar(stat = "identity") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_flip()
+
+occupation_graph_pct <- training_set %>% 
+  group_by(occupation, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(occupation, order), y = pct, fill = income)) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name= "Percentage", labels = percent) +
+  scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") + 
+  geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
+  theme(plot.title = element_text(hjust = 0.5), axis.text.y=element_blank()) +
+  coord_flip()
+grid.arrange(occupation_graph_distr, occupation_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaOccupation} shows the distribution of the respondent's occupation. It can be observed that respondents with a position the the executive management or a professional specialization have a higher than average probability to gain more than 50.000 US Dollar per year.
+
+### Relationship
+
+```{r edaRelationship, echo=FALSE, fig.cap="Relationship"}
+relationship_graph_distr <- training_set %>% 
+  group_by(relationship, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(relationship, order), y = n)) +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name = "Count") +
+  geom_bar(stat = "identity") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_flip()
+
+relationship_graph_pct <- training_set %>% 
+  group_by(relationship, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(relationship, order), y = pct, fill = income)) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name= "Percentage", labels = percent) +
+  scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") + 
+  geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
+  theme(plot.title = element_text(hjust = 0.5), axis.text.y=element_blank()) +
+  coord_flip()
+grid.arrange(relationship_graph_distr, relationship_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaRelationship} shows the distribution of the respondent's relationship. In concordance with Figure \ref{fig:edaMaritalStatus}, married respondents (Wife or Husband) have a higher probability than average to earn more than 50.000 US Dollar per year. 
+
+### Race
+
+```{r edaRace, echo=FALSE, fig.cap="Race"}
+race_graph_distr <- training_set %>% 
+  group_by(race, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(race, order), y = n)) +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name = "Count") +
+  geom_bar(stat = "identity") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_flip()
+
+race_graph_pct <- training_set %>% 
+  group_by(race, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(race, order), y = pct, fill = income)) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name= "Percentage", labels = percent) +
+  scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") + 
+  geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
+  theme(plot.title = element_text(hjust = 0.5), axis.text.y=element_blank()) +
+  coord_flip()
+grid.arrange(race_graph_distr, race_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaRace} shows the distribution of the respondent's race. Since most respondents are white this variable might not be very useful whether a respondent earns more than 50.000 US Dollar per year.
+
+### Sex
+
+```{r edaSex, echo=FALSE, fig.cap="Sex"}
+sex_graph_distr <- training_set %>% 
+  group_by(sex, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(sex, order), y = n)) +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name = "Count") +
+  geom_bar(stat = "identity") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_flip()
+
+sex_graph_pct <- training_set %>% 
+  group_by(sex, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(sex, order), y = pct, fill = income)) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name= "Percentage", labels = percent) +
+  scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") + 
+  geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
+  theme(plot.title = element_text(hjust = 0.5), axis.text.y=element_blank()) +
+  coord_flip()
+grid.arrange(sex_graph_distr, sex_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaSex} shows that approximately two-third of the respondents is male. It also shows that males are more likely to earn more then 50.000 US Dollar per year than females.
+
+### Capital Gain/Loss
+
+```{r edaCapitalGainLoss, echo=FALSE, fig.cap="Captail Gain/Loss"}
+capitalgain_graph_distr <- training_set %>% 
+  ggplot(aes(x=capital.gain)) +
+  geom_histogram(binwidth = 10000) +
+  scale_x_continuous(name = "Capital Gain") +
+  scale_y_continuous(name = "Count") 
+
+capitalgain_graph_pct <- training_set %>% 
+  group_by(capital.gain, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n)) %>% 
+  complete(income, fill = list(n = 0, pct = 0)) %>% 
+  group_by(capital.gain) %>% 
+  mutate(max = max(as.numeric(income))) %>% 
+  filter(as.numeric(income)==max) %>% 
+  ggplot(aes(x = capital.gain, y = pct)) +
+  stat_smooth(geom = "area", method = "loess", span = 1/3, alpha = 1/2, fill = "#9ecae1") +
+  scale_y_continuous(name = "Percentage", limits = c(0,1), labels = percent) +
+  scale_x_continuous(name = "Capital Gain")
+
+capitalloss_graph_distr <- training_set %>% 
+  ggplot(aes(x=capital.loss)) +
+  geom_histogram(binwidth = 500) +
+  scale_x_continuous(name = "Capital Loss") +
+  scale_y_continuous(name = "Count") 
+
+capitalloss_graph_pct <- training_set %>% 
+  group_by(capital.loss, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n)) %>% 
+  complete(income, fill = list(n = 0, pct = 0)) %>% 
+  group_by(capital.loss) %>% 
+  mutate(max = max(as.numeric(income))) %>% 
+  filter(as.numeric(income)==max) %>% 
+  ggplot(aes(x = capital.loss, y = pct)) +
+  stat_smooth(geom = "area", method = "loess", span = 1/3, alpha = 1/2, fill = "#9ecae1") +
+  scale_y_continuous(name = "Percentage", limits = c(0,1), labels = percent) +
+  scale_x_continuous(name = "Capital Loss")
+
+
+grid.arrange(capitalgain_graph_distr, capitalgain_graph_pct, capitalloss_graph_distr, capitalloss_graph_pct,nrow = 2, ncol=2)
+```
+
+Figure \ref{fig:edaCapitalGainLoss} shows the income that the respondent gained/lost from sources than salary/wages. It's clear that most respondents don't have other income sources than salary/wages. Those who have other income sources are likely to gain more than 50.000 US Dollar per year.
+
+### Hours per Week
+
+```{r edaHoursPerWeek, echo=FALSE, fig.cap="Hours per Week"}
+hours_per_week_graph_distr <- training_set %>% 
+  ggplot(aes(x=hours.per.week)) +
+  geom_histogram(binwidth = 1) +
+  scale_x_continuous(name = "Hours per Week", breaks = seq(0,90,10), labels = seq(0,90,10)) +
+  scale_y_continuous(name = "Count") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+hours_per_week_graph_pct <- training_set %>% 
+  group_by(hours.per.week, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = n/sum(n)) %>% 
+  complete(income, fill = list(n = 0, pct = 0)) %>% 
+  group_by(hours.per.week) %>% 
+  mutate(max = max(as.numeric(income))) %>% 
+  filter(as.numeric(income)==max) %>% 
+  ggplot(aes(x = hours.per.week, y = pct)) +
+  stat_smooth(geom = "area", method = "loess", span = 1/3, alpha = 1/2, fill = "#9ecae1") +
+  scale_y_continuous(name = "Percentage", limits = c(0,0.45), labels = percent) +
+  scale_x_continuous(name = "Hours per Week", breaks = seq(0,90,10), labels = seq(0,90,10))
+grid.arrange(hours_per_week_graph_distr, hours_per_week_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaHoursPerWeek} shows that most respondents work 40 hours per week. Respondents that earn more than 50.000 US Dollar per year work mostly likely more than 40 hours per week and less than 70 hours per week.
+
+### Native Country
+
+```{r edaNativeCountry, echo=FALSE, fig.cap="Native Country"}
+native_country_graph_distr <- training_set %>% 
+  group_by(native.country, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(native.country, order), y = n)) +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name = "Count") +
+  geom_bar(stat = "identity") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  coord_flip()
+
+native_country_graph_pct <- training_set %>% 
+  group_by(native.country, income) %>% 
+  summarize(n = n()) %>% 
+  mutate(pct = ifelse(n/sum(n)==0,NA,n/sum(n)), order = ifelse(income==1, n/sum(n), 0)) %>% 
+  ggplot(aes(x = reorder(native.country, order), y = pct, fill = income)) +
+  geom_bar(stat = "identity") +
+  scale_x_discrete(name = "") +
+  scale_y_continuous(name= "Percentage", labels = percent) +
+  scale_fill_brewer(name = "Income", labels = c("<=50K", ">50K"), palette = "Blues") + 
+  geom_text(aes(label = paste0(round(pct*100,0),"%")), position = position_stack(vjust = 0.5), size = 4, color = "black") +
+  theme(plot.title = element_text(hjust = 0.5), axis.text.y=element_blank()) +
+  coord_flip()
+grid.arrange(native_country_graph_distr, native_country_graph_pct, nrow = 1)
+```
+
+Figure \ref{fig:edaNativeCountry} shows that almost all respondents are from the United States. This variable will probably not useful in predicting whether a respondent will earn more than 50.000 US Dollar per year.
+
+### Exploratory Data Analysis - Conclusions
+As a result of the Exploratory Data Analysis insights are gained and four new columns are created: 
+
+* __married__: Categorical variable that indicates whether a respondent is currently married (*Married* = 1, *Not-Married* = 0).
+* __other.income__: Categorical variable that indicates whether a respondent has another source of income besides salary/wages. If a respondent has a Capital Gain > 0 or a Capital Loss > 0 it's assumed (s)he has another source of income. (*Other Income* = 1, *No Other Income* = 0).
+* __hours.per.week.2__: Categorical variable that indicates whether a respondent work more than 40 hours per week (*> 40hrs p/w* = 1, *<= 40hrs p/w* = 0).
+* __workclass.2__: Categorical variable based on the variable *workclass*. This new variable contains the categories *Private*, *Government*, *self Employed* and *Other*.
+
+
+##Modeling Methods
+The project will use two methods to predict whether a respondent gain more than 50.000 US Dollar per year. 
+
+###k-Nearest Neighbors
+The first method that will be used is K-Nearest Neighbors. This is an intuitive and fast method for classification problems. 
+
+The K-Nearest Neighbors method classifies new observations based on its similarity to known observations. The similarity is based on the distance between the variables of a new observation and the variables of the *k* closest known observations. 
+
+Since the distance can only be measured for numeric variables the following variables are included in the model:
+
+* __age__
+* __education.num__
+* __capital.gain__
+* __capital.loss__
+* __hours.per.week__
+
+The variables are pre-processed before the modelling takes place because the different ranges of the variables can distort the classification process. For example, the variable *education.num* ranges between 1 and 16, while *capital.gain* has a range of 0 to 99999. All numeric variables are centered and scales, i.e. the observations value is extracted by it's mean and divided by it's standard deviation (of all observations).
+
+There exist different definitions to measure the distance between observation; Euclidean distance, Manhattan distance, Minkwoski distance, etc. In this project the default method (Euclidean) is used to measure the distance. The *caret* package is used to train the model.
+
+10-Fold Cross Validation is used to train the model. This is repeated three times. In total 13 models with a different number of neighbors were trained. Figure \ref{fig:trainingKNN} shows the accuracy of the different models using 10-fold Cross Validation.
+
+The trained model with 23 neighbors has the highest accuracy. Although the accuracy with 23 neighbors looks a bit 'extreme' compared to the nearby neighbors and the ascend in the accuracy seems to stop near 30 neighbors, this model (K=23) is still used to measure the performance of the validation set.
+
+```{r trainingKNN, echo=FALSE, fig.cap="Training a k-NN model"}
+# CREATE TRAINING AND VALIDATION SET ONLY THE NUMERIC VARIABLES AND THE RESPONSE VARAIBLE
+training_set_knn <- training_set[,c("age", "education.num", "capital.gain", "capital.loss", "hours.per.week", "income")]
+validation_set_knn <- validation_set[,c("age", "education.num", "capital.gain", "capital.loss", "hours.per.week", "income")]
+
+# TRAIN MODEL:
+# - METHOD: K-NN
+# - TRAIN CONTROL: 10X CROSS-VALIDATION
+# - PREPROCESSING: NORMALIZE NUMERICAL VARIABLES
+# - NB. OF NEIGHBORS: FROM 11 TO 35 (ODD ONLY)
+
+set.seed(1, sample.kind="Rounding")
+trainControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+knn_fit <- train(income ~., data = training_set_knn, method="knn", trControl = trainControl, preProcess = c("center", "scale"), tuneGrid = expand.grid(k = seq(11,35,2)))
+
+# PLOT RESULTS TRANING
+plot(knn_fit) # OPTINAL NUMBER OF NEIGHBORS: 23
+```
+
+###Random Forest
+The second method that will be used is a Random Forest. A Random Forest is an ensemble classification method were different uncorrelated decision trees predict by committee the class of a new observation.
+
+Random Forests can handle both numeric as categorical variables. However, training a Random Forest can be time consuming (on a normal consumer laptop). Based on the results of the Exploratory Data Analysis section a selection has been made of variable that will be included in the model and reduce training time. The variables that are included based on how well they separate the two classes (<=50K p/y or >50K p/y). Figures \ref{fig:edaAge} - \ref{fig:edaNativeCountry} helped to select the following variables:
+
+* __age__
+* __education.num__
+* __marital.status__
+* __relationship__
+* __capital.gain__
+* __sex__
+
+The *randomForest* package in *R* provides the user a lot of options for parameter tuning, such as the number of decision trees used in the forest, the maximum depth of each tree, etc. However, since training a Random Forest is time quite time consuming all default parameters were used.
+
+```{r trainingRF, echo=FALSE, fig.cap="Training a Random Forest"}
+# CREATE TRAINING AND VALIDATION SET WITH ONLY THE MOST IMPORTANTE VARIABLES BASED ON THE EXPLORATORY DATA ANALYSIS 
+training_set_rf <- training_set[,c("age", "education.num", "marital.status", "occupation", "relationship", "sex", "capital.gain", "income")]
+validation_set_rf <- validation_set[,c("age", "education.num", "marital.status", "occupation", "relationship", "sex", "capital.gain", "income")]
+
+# TRAIN MODEL:
+# - METHOD: RANDOM FOREST
+
+set.seed(1, sample.kind="Rounding")
+rf_fit <- randomForest(income~., data = training_set_rf)
+
+# PLOT VARIABLE IMPORTANCE
+varImpPlot(rf_fit, main="Variable Importance")
+```
+
+Figure \ref{fig:trainingRF} the importance of each variable in the Random Forest. It turns out that the *relationship* and *capital.gain* variables are the most important to classify new observations. This is in line with Figures \ref{fig:edaRelationship} and \ref{fig:edaCapitalGainLoss}.
+
+#Results
+In this section the performance of the k-Nearest Neighbors model and the Random Forest is compared.
+
+The performance of the selected k-Nearest Neighbors model (K=23) on the validation set is shown below. The model has an accuracy of 0.8219. In the confusion matrix Class 1 represents the respondents that earn more than 50.000 US Dollar per year.
+
+In this project we're interested in classifying correctly the respondents that earn more than 50.000 US Dollar per year (Class 1). It can be observed that only 1053 of the 2353 respondents of Class 1 are classified correctly, i.e. a specificity of 0.4475. 
+
+The performance of the Random Forest on the validation set is shown below. Again, Class 1 are the respondents that earn more than 50.000 US Dollar per year. The Random Forest has a higher accuracy than the k-Nearest Neighbors model, 0.8536 vs. 0.8219 respectively. With a specificity of 0.6022 the Random Forest has a higher specificity than the k-Nearest Neighbors model.
+
+Comparing the 95% confidence intervals of the accuracy of the k-Nearest Neighbors model (0.8142 - 0.8294) and the Random Forest (0.8465 - 0.8606) it can be concluded that the Random Forest performs better.
+
+```{r performanceKNN, echo=FALSE, fig.cap="Performance k-Nearest Neighbors"}
+# CREATE PREDICTIONS AND CONFUSION MATRIX
+predict_knn <- predict(knn_fit, newdata = validation_set_knn)
+confMatrix_knn <- confusionMatrix(predict_knn, validation_set_knn$income)
+print("Performance k-Nearest Neighbors")
+confMatrix_knn
+```
+
+```{r performanceRF, echo=FALSE, fig.cap="Performance RandomForest"}
+# CREATE PREDICTIONS AND CONFUSION MATRIX
+predict_rf <- predict(rf_fit, newdata = validation_set_rf)
+confMatrix_rf <- confusionMatrix(predict_rf, validation_set_rf$income)
+print("Performance Random Forest")
+confMatrix_rf
+```
+
+#Discussion
+In this assignment the publicly available Adult Census Income data was used to predict whether a respondent earns more than 50.000 US Dollar per year. 
+
+First an Exploratory Data Analysis was carried out. Then two machine learning models were build; a k-Nearest Neighbors model and a Random Forest. The Random Forest model performed better (higher accuracy, higher specificity). 
+
+Further analysis can be carried out to improve the predictions. For example, a Random Forest provides a lot of options for parameter tuning. Since training of a Random Forest is time consuming on a normal laptop, parameter tuning wasn't done in this study. Besides that only a subset of the available variables was used in the Random Forest. Also, one could try to build other/more complex models. Finally, one could try to create new variables that might be useful in this classification problem.
+
